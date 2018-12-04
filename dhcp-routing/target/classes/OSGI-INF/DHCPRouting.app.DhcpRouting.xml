@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scr:component xmlns:scr="http://www.osgi.org/xmlns/scr/v1.1.0" immediate="true" name="DHCPRouting.app.DhcpRouting" activate="activate" deactivate="deactivate">
+    <reference name="coreService" interface="org.onosproject.core.CoreService" cardinality="1..1" policy="static" bind="bindCoreService" unbind="unbindCoreService"/>
+    <reference name="cfgService" interface="org.onosproject.net.config.NetworkConfigRegistry" cardinality="1..1" policy="static" bind="bindCfgService" unbind="unbindCfgService"/>
+    <reference name="packetService" interface="org.onosproject.net.packet.PacketService" cardinality="1..1" policy="static" bind="bindPacketService" unbind="unbindPacketService"/>
+    <reference name="hostService" interface="org.onosproject.net.host.HostService" cardinality="1..1" policy="static" bind="bindHostService" unbind="unbindHostService"/>
+    <reference name="topologyService" interface="org.onosproject.net.topology.TopologyService" cardinality="1..1" policy="static" bind="bindTopologyService" unbind="unbindTopologyService"/>
+    <reference name="flowObjectiveService" interface="org.onosproject.net.flowobjective.FlowObjectiveService" cardinality="1..1" policy="static" bind="bindFlowObjectiveService" unbind="unbindFlowObjectiveService"/>
+    <implementation class="DHCPRouting.app.DhcpRouting"/>
+</scr:component>
