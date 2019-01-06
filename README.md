@@ -1,9 +1,9 @@
 # dhcp-routing
-make DHCP become unicast with ONOS
+make DHCP become unicast with ONOS</br>
 
 DHCP: isc-dhcp-server</br>
-ONOS: 1.14
-mininet: 2.2.1
+ONOS: 1.14</br>
+mininet: 2.2.1</br>
 
 1. DHCPsecond.py</br>
 	It creates two switches(s1, s2) and three hosts(h1, h2, dhcp).</br>
@@ -11,8 +11,8 @@ mininet: 2.2.1
 	dhcp links to s2.</br>
 	h1 will get dynamic IP from dhcp.</br>
 	h2 has static IP.</br>
-2. dhcp-routing.json
-	It tells the processor where dhcp is.
+2. dhcp-routing.json</br>
+	It tells the processor where dhcp is.</br>
 
-3. dhpd.conf
-	It contains the configuration of dhcp server.
+3. dhpd.conf</br>
+	It contains the configuration of dhcp server.</br>
