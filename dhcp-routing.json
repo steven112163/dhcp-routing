@@ -1,0 +1,9 @@
+{
+  "apps": {
+    "DHCPRouting.app" : {
+      "dhcpRouting" : {
+        "deviceConnectPoint": "of:0000000000000002/2"
+      }
+    }
+  }
+}
