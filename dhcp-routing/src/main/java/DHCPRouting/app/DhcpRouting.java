@@ -54,12 +54,14 @@ import org.onosproject.net.flow.DefaultTrafficSelector;
 import org.onosproject.net.flow.TrafficSelector;
 import org.onosproject.net.flow.TrafficTreatment;
 import org.onosproject.net.flow.DefaultTrafficTreatment;
+import org.onosproject.net.flow.FlowRuleService;
 
 import org.onosproject.net.flowobjective.DefaultForwardingObjective;
 import org.onosproject.net.flowobjective.ForwardingObjective;
 import org.onosproject.net.flowobjective.FlowObjectiveService;
 
 import org.onosproject.net.host.HostService;
+
 import org.onosproject.net.topology.TopologyService;
 
 import org.slf4j.Logger;
@@ -76,291 +78,330 @@ import static org.onosproject.net.config.basics.SubjectFactories.APP_SUBJECT_FAC
 @Component(immediate = true)
 public class DhcpRouting {
 
-    private static final int DEFAULT_TIMEOUT = 10;
-    private static final int DEFAULT_PRIORITY = 50000;
+	private static final int DEFAULT_TIMEOUT = 10;
+	private static final int DEFAULT_PRIORITY = 50000;
     
-    private final Logger log = LoggerFactory.getLogger(getClass());
+	private final Logger log = LoggerFactory.getLogger(getClass());
     
-    private final InternalConfigListener cfgListener = new InternalConfigListener();
+	private final InternalConfigListener cfgListener = new InternalConfigListener();
 
-    private final Set<ConfigFactory> factories = ImmutableSet.of(
-    	new ConfigFactory<ApplicationId, DhcpRoutingConfig>(APP_SUBJECT_FACTORY,
-    			DhcpRoutingConfig.class,
-    			"dhcpRouting") {
-    		@Override
-    		public DhcpRoutingConfig createConfig() {
-    			return new DhcpRoutingConfig();
-    		}
-    	}
-    );
-    
-
-    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-    protected CoreService coreService;
-
-    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-    protected NetworkConfigRegistry cfgService;
-
-    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-    protected PacketService packetService;
-    
-    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-    protected HostService hostService;
-    
-    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-    protected TopologyService topologyService;
-
-    private DHCPRoutingProcessor processor = new DHCPRoutingProcessor();
-    
-    @Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
-    protected FlowObjectiveService flowObjectiveService;
-    protected FlowObjectiveService flowObjectiveService2;
-
-    private ApplicationId appId;
-
-    private static ConnectPoint deviceConnectPoint = null;
-
-
-    @Activate
-    protected void activate() {
-    	appId = coreService.registerApplication("DHCPRouting.app");
-    	cfgService.addListener(cfgListener);
-    	factories.forEach(cfgService::registerConfigFactory);
-    	packetService.addProcessor(processor, PacketProcessor.director(2));
-    	requestsPackets();
-
-        log.info("Started");
-    }
-
-    @Deactivate
-    protected void deactivate() {
-    	cfgService.removeListener(cfgListener);
-    	factories.forEach(cfgService::unregisterConfigFactory);
-    	packetService.removeProcessor(processor);
-    	processor = null;
-    	cancelPackets();
-
-        log.info("Stopped");
-    }
-
-    /**
-     * Request packet in via PacketService
-     */
-    private void requestsPackets() {
-    	TrafficSelector.Builder selector = DefaultTrafficSelector.builder()
-    		.matchEthType(Ethernet.TYPE_IPV4)
-    		.matchIPProtocol(IPv4.PROTOCOL_UDP)
-    		.matchUdpDst(TpPort.tpPort(UDP.DHCP_SERVER_PORT))
-    		.matchUdpSrc(TpPort.tpPort(UDP.DHCP_CLIENT_PORT));
-    	packetService.requestPackets(selector.build(), PacketPriority.CONTROL, appId);
-
-    	selector = DefaultTrafficSelector.builder()
-    		.matchEthType(Ethernet.TYPE_IPV4)
-    		.matchIPProtocol(IPv4.PROTOCOL_UDP)
-    		.matchUdpDst(TpPort.tpPort(UDP.DHCP_CLIENT_PORT))
-    		.matchUdpSrc(TpPort.tpPort(UDP.DHCP_SERVER_PORT));
-    	packetService.requestPackets(selector.build(), PacketPriority.CONTROL, appId);
-    }
-
-    /**
-     * Cancel requested packets in via packet service
-     */
-    private void cancelPackets() {
-    	TrafficSelector.Builder selector = DefaultTrafficSelector.builder()
-    		.matchEthType(Ethernet.TYPE_IPV4)
-    		.matchIPProtocol(IPv4.PROTOCOL_UDP)
-    		.matchUdpDst(TpPort.tpPort(UDP.DHCP_SERVER_PORT))
-    		.matchUdpSrc(TpPort.tpPort(UDP.DHCP_CLIENT_PORT));
-    	packetService.cancelPackets(selector.build(), PacketPriority.CONTROL, appId);
-
-    	selector = DefaultTrafficSelector.builder()
-    		.matchEthType(Ethernet.TYPE_IPV4)
-    		.matchIPProtocol(IPv4.PROTOCOL_UDP)
-    		.matchUdpDst(TpPort.tpPort(UDP.DHCP_CLIENT_PORT))
-    		.matchUdpSrc(TpPort.tpPort(UDP.DHCP_SERVER_PORT));
-    	packetService.cancelPackets(selector.build(), PacketPriority.CONTROL, appId);
-    }
+	private final Set<ConfigFactory> factories = ImmutableSet.of(
+		new ConfigFactory<ApplicationId, DhcpRoutingConfig>(APP_SUBJECT_FACTORY,
+				DhcpRoutingConfig.class,
+				"dhcpRouting") {
+			@Override
+			public DhcpRoutingConfig createConfig() {
+				return new DhcpRoutingConfig();
+			}
+		}
+	);
     
 
-    private class DHCPRoutingProcessor implements PacketProcessor {
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected CoreService coreService;
+	
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected FlowRuleService flowRuleService;
 
-    	@Override
-        public void process(PacketContext context) {
-            // Stop processing if the packet has been handled, since we
-            // can't do any more to it.
-            if (context.isHandled()) {
-                return;
-            }
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected NetworkConfigRegistry cfgService;
 
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected PacketService packetService;
+    
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected HostService hostService;
+    
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected TopologyService topologyService;
+
+	private DHCPRoutingProcessor processor = new DHCPRoutingProcessor();
+    
+	@Reference(cardinality = ReferenceCardinality.MANDATORY_UNARY)
+	protected FlowObjectiveService flowObjectiveService;
+	protected FlowObjectiveService flowObjectiveService2;
+
+	private ApplicationId appId;
+
+	private static ConnectPoint deviceConnectPoint = null;
+
+
+	@Activate
+	protected void activate() {
+		appId = coreService.registerApplication("DHCPRouting.app");
+		cfgService.addListener(cfgListener);
+		factories.forEach(cfgService::registerConfigFactory);
+		packetService.addProcessor(processor, PacketProcessor.director(2));
+		requestsPackets();
+
+		log.info("Started");
+	}
+
+	@Deactivate
+	protected void deactivate() {
+		cfgService.removeListener(cfgListener);
+		factories.forEach(cfgService::unregisterConfigFactory);
+		flowRuleService.removeFlowRulesById(appId);
+		packetService.removeProcessor(processor);
+		processor = null;
+		cancelPackets();
+
+		log.info("Stopped");
+	}
+
+	/**
+	 * Request packet in via PacketService
+	 */
+	private void requestsPackets() {
+		TrafficSelector.Builder selector = DefaultTrafficSelector.builder()
+			.matchEthType(Ethernet.TYPE_IPV4)
+			.matchIPProtocol(IPv4.PROTOCOL_UDP)
+			.matchUdpDst(TpPort.tpPort(UDP.DHCP_SERVER_PORT))
+			.matchUdpSrc(TpPort.tpPort(UDP.DHCP_CLIENT_PORT));
+		packetService.requestPackets(selector.build(), PacketPriority.CONTROL, appId);
+
+		selector = DefaultTrafficSelector.builder()
+			.matchEthType(Ethernet.TYPE_IPV4)
+			.matchIPProtocol(IPv4.PROTOCOL_UDP)
+			.matchUdpDst(TpPort.tpPort(UDP.DHCP_CLIENT_PORT))
+			.matchUdpSrc(TpPort.tpPort(UDP.DHCP_SERVER_PORT));
+		packetService.requestPackets(selector.build(), PacketPriority.CONTROL, appId);
+	}
+
+	/**
+	 * Cancel requested packets in via packet service
+	 */
+	private void cancelPackets() {
+		TrafficSelector.Builder selector = DefaultTrafficSelector.builder()
+			.matchEthType(Ethernet.TYPE_IPV4)
+			.matchIPProtocol(IPv4.PROTOCOL_UDP)
+			.matchUdpDst(TpPort.tpPort(UDP.DHCP_SERVER_PORT))
+			.matchUdpSrc(TpPort.tpPort(UDP.DHCP_CLIENT_PORT));
+		packetService.cancelPackets(selector.build(), PacketPriority.CONTROL, appId);
+
+		selector = DefaultTrafficSelector.builder()
+			.matchEthType(Ethernet.TYPE_IPV4)
+			.matchIPProtocol(IPv4.PROTOCOL_UDP)
+			.matchUdpDst(TpPort.tpPort(UDP.DHCP_CLIENT_PORT))
+			.matchUdpSrc(TpPort.tpPort(UDP.DHCP_SERVER_PORT));
+		packetService.cancelPackets(selector.build(), PacketPriority.CONTROL, appId);
+	}
+    
+
+	private class DHCPRoutingProcessor implements PacketProcessor {
+
+		/**
+		 * Process the packet
+		 *
+		 * @param context content of the incoming message
+		 */
+		@Override
+		public void process(PacketContext context) {
+			// Stop processing if the packet has been handled, since we
+			// can't do any more to it.
+			if (context.isHandled()) {
+				return;
+			}
+
+			// Don't process the packet if the device connect point
+			// isn't configured.
 			if (deviceConnectPoint == null) {
 				log.warn("Device connect point isn't configured!!!");
 				return;
 			}
 
-            InboundPacket pkt = context.inPacket();
-            Ethernet ethPkt = pkt.parsed();
+			InboundPacket pkt = context.inPacket();
+			Ethernet ethPkt = pkt.parsed();
+			
+			// Don't process null packet
+			if (ethPkt == null) {
+				return;
+			}
 
-            if (ethPkt == null) {
-                return;
-            }
+			HostId dstId = HostId.hostId(ethPkt.getDestinationMAC()); 
+			Host dst = hostService.getHost(dstId);   
 
-            HostId dstId = HostId.hostId(ethPkt.getDestinationMAC()); 
-            Host dst = hostService.getHost(dstId);   
-
-            if (ethPkt.isBroadcast()) {
-                log.info("Is broadcast!!!\n");
-                if (pkt.receivedFrom().deviceId().equals(deviceConnectPoint.deviceId())) {
-                    log.info("Broadcast reaches destination switch!!!\n");
-                    installRule(context, deviceConnectPoint.port());
-                    return;
-                } 
-
-                log.info("Broadcast doesn't reach desitnation switch\n");
-
-                Set<Path> paths =
-                    topologyService.getPaths(topologyService.currentTopology(),
-                                             pkt.receivedFrom().deviceId(),
-                                             deviceConnectPoint.deviceId()); 
-                if (paths.isEmpty()) {
-                    // If there are no paths, flood and bail.
-                    log.warn("A:Didn't find the path!!!\n");
-                    flood(context);
-                    return;
-                }
-
-                // Otherwise, pick a path that does not lead back to where we
-                // came from; if no such path, flood and bail.
-                Path path = pickForwardPathIfPossible(paths, pkt.receivedFrom().port());
-                if (path == null) {
-                    log.warn("A:Don't know where to go from here {} for {} -> {}\n",
-                    pkt.receivedFrom(), ethPkt.getSourceMAC(), ethPkt.getDestinationMAC());
-                    flood(context);
-                    return;
-                }
-                installRule(context, path.src().port());
-                return;       
-            } 
-
-            // Are we on an edge switch that our destination is on? If so,
-            // simply forward out to the destination and bail.            
-            if (pkt.receivedFrom().deviceId().equals(dst.location().deviceId())) {
-                if (!context.inPacket().receivedFrom().port().equals(dst.location().port())) {
-                    log.info("On edge switch!!!\n");
-                    installRule(context, dst.location().port());
-                }
-                return;
-            } 
-        
-            log.info("Not broadcast!!!\n");                               
-            Set<Path> paths =
-                topologyService.getPaths(topologyService.currentTopology(),
-                                             pkt.receivedFrom().deviceId(),
-                                             dst.location().deviceId());
-            if (paths.isEmpty()) {
-                // If there are no paths, flood and bail.
-                log.warn("B:Didn't find the path!!!\n");
-                flood(context);
-                return;
-            }
-
-            // Otherwise, pick a path that does not lead back to where we
-            // came from; if no such path, flood and bail.
-            Path path = pickForwardPathIfPossible(paths, pkt.receivedFrom().port());
-            if (path == null) {
-                log.warn("B:Don't know where to go from here {} for {} -> {}\n",
-                pkt.receivedFrom(), ethPkt.getSourceMAC(), ethPkt.getDestinationMAC());
-                flood(context);
-                return;
-            }
-
-            // Otherwise forward and be done with it.
-            installRule(context, path.src().port());
-
-        }
-    }
+			if (ethPkt.isBroadcast()) { // DHCP discover and request packets (L2)
+				log.info("DHCP broadcast!!!\n");
+				findPathAndInstallRule(context, pkt, ethPkt, dst, true);      
+			} else { // DHCP offer and ack packets (L2)
+				log.info("DHCP unicast!!!\n");
+				findPathAndInstallRule(context, pkt, ethPkt, dst, false);
+			}
+		}
+	}
     
-    private class InternalConfigListener implements NetworkConfigListener {
-    	 /**
-         * Reconfigures the DHCP Server according to the configuration parameters passed.
-         *
-         * @param cfg configuration object
-         */
-        private void reconfigureNetwork(DhcpRoutingConfig cfg) {
-            if (cfg == null) {
-                return;
-            }
-            if (cfg.devicePoint() != null) {
-                deviceConnectPoint = cfg.devicePoint();
-            }
-        }
-         @Override
-        public void event(NetworkConfigEvent event) {
-            if ((event.type() == NetworkConfigEvent.Type.CONFIG_ADDED ||
-                    event.type() == NetworkConfigEvent.Type.CONFIG_UPDATED) &&
-                    event.configClass().equals(DhcpRoutingConfig.class)) {
+	private class InternalConfigListener implements NetworkConfigListener {
+	
+		/**
+		 * Reconfigures the DHCP Server according to the configuration parameters passed.
+		 *
+		 * @param cfg configuration object
+		 */
+		private void reconfigureNetwork(DhcpRoutingConfig cfg) {
+			if (cfg == null) {
+				return;
+			}
+			if (cfg.devicePoint() != null) {
+				deviceConnectPoint = cfg.devicePoint();
+			}
+		}
+		
+		@Override
+		public void event(NetworkConfigEvent event) {
+			if ((event.type() == NetworkConfigEvent.Type.CONFIG_ADDED ||
+				 event.type() == NetworkConfigEvent.Type.CONFIG_UPDATED) &&
+				 event.configClass().equals(DhcpRoutingConfig.class)) {
 
-                DhcpRoutingConfig cfg = cfgService.getConfig(appId, DhcpRoutingConfig.class);
-                reconfigureNetwork(cfg);
-                log.info("Reconfigured");
-            }
-        }
-    }
-    
-    private void packetOut(PacketContext context, PortNumber portNumber) {
-        context.treatmentBuilder().setOutput(portNumber);
-        context.send();
-    }
-    
-    private void flood(PacketContext context) {
-        if (topologyService.isBroadcastPoint(topologyService.currentTopology(),
-                                             context.inPacket().receivedFrom())) {
-            packetOut(context, PortNumber.FLOOD);
-        } else {
-            context.block();
-        }
-    }
-    
-    private Path pickForwardPathIfPossible(Set<Path> paths, PortNumber notToPort) {
-        for (Path path : paths) {
-            if (!path.src().port().equals(notToPort)) {
-                return path;
-            }
-        }
-        return null;
-    }
-    
-    private void installRule(PacketContext context, PortNumber portNumber){
-        TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
-        InboundPacket pkt = context.inPacket(); 
-        Ethernet inPkt = pkt.parsed();
+				DhcpRoutingConfig cfg = cfgService.getConfig(appId, DhcpRoutingConfig.class);
+				reconfigureNetwork(cfg);
+				log.info("Reconfigured!!!\n");
+			}
+		}
+		
+	}
 
-        if (inPkt.isBroadcast()){
-            selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
-                        .matchIPProtocol(IPv4.PROTOCOL_UDP)
-                        .matchUdpDst(TpPort.tpPort(UDP.DHCP_SERVER_PORT))
-                        .matchUdpSrc(TpPort.tpPort(UDP.DHCP_CLIENT_PORT));
+	/**
+	 * Find the way to the destination and install rule on a switch
+	 *
+	 * @param context content of the incoming message
+	 * @param pkt the original packet
+	 * @param ethPkt the Ethernet payload
+	 * @param dst destination host
+	 * @param broadcast true if the packet is broadcast
+	 */
+	private void findPathAndInstallRule(PacketContext context, InboundPacket pkt, Ethernet ethPkt, Host dst, boolean broadcast) {
+		
+		// Is the packet on an edge switch that the destination is on? If so,
+		// simply forward out to the destination and bail.
+		if (broadcast) {
+			if (pkt.receivedFrom().deviceId().equals(deviceConnectPoint.deviceId())) {
+				log.info("Broadcast is on destination switch!!!\n");
+				installRule(context, deviceConnectPoint.port());
+				return;
+			}
+		} else { 
+			if (pkt.receivedFrom().deviceId().equals(dst.location().deviceId())) {
+				if (!context.inPacket().receivedFrom().port().equals(dst.location().port())) {
+					log.info("Unicast is on edge switch!!!\n");
+					installRule(context, dst.location().port());
+				}
+				return;
+			}
+		}
+		
+		// The packet is not on edge switch, find a path to the destination.
+		Set<Path> paths;
+		if (broadcast) {
+			paths = topologyService.getPaths(topologyService.currentTopology(),
+					pkt.receivedFrom().deviceId(),
+					deviceConnectPoint.deviceId());
+		} else {
+			paths = topologyService.getPaths(topologyService.currentTopology(),
+					pkt.receivedFrom().deviceId(),
+					dst.location().deviceId());
+		}
+		
+		// If there are no paths, flood and bail.
+		if (paths.isEmpty()) {
+			log.warn("Packet floods!!!\n");
+			flood(context);
+			return;
+		}
+		
+		// Otherwise, pick a path that does not lead back to where the packet
+		// came from; if no such path, flood and bail.
+		Path path = pickForwardPathIfPossible(paths, pkt.receivedFrom().port());
+		if (path == null) {
+			log.warn("Packet doesn't know where to go from here {} for {} -> {}\n",
+			pkt.receivedFrom(), ethPkt.getSourceMAC(), ethPkt.getDestinationMAC());
+			flood(context);
+			return;
+		}
 
-        } else {
-            selectorBuilder.matchInPort(context.inPacket().receivedFrom().port())
-                        .matchEthSrc(inPkt.getSourceMAC())
-                        .matchEthDst(inPkt.getDestinationMAC()); 
+		// Otherwise forward and be done with it.
+		installRule(context, path.src().port());
+	}
 
-        }
+	/**
+	 * Send the packet out from the port
+	 *
+	 * @param context content of the incoming message
+	 * @param portNumber output port of the packet
+	 */
+	private void packetOut(PacketContext context, PortNumber portNumber) {
+		context.treatmentBuilder().setOutput(portNumber);
+		context.send();
+	}
 
-        TrafficTreatment treatment = DefaultTrafficTreatment.builder()
-                .setOutput(portNumber)
-                .build();
+	/**
+	 * flood the packet
+	 *
+	 * @param context content of the incoming message
+	 */
+	private void flood(PacketContext context) {
+		if (topologyService.isBroadcastPoint(topologyService.currentTopology(),
+											 context.inPacket().receivedFrom())) {
+			packetOut(context, PortNumber.FLOOD);
+		} else {
+			context.block();
+		}
+	}
 
-        ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
-                .withSelector(selectorBuilder.build())
-                .withTreatment(treatment)
-                .withPriority(DEFAULT_PRIORITY)
-                .withFlag(ForwardingObjective.Flag.VERSATILE)
-                .fromApp(appId)
-                .makeTemporary(DEFAULT_TIMEOUT)
-                .add();
+	/**
+	 * Pick a path that does not lead back to where the packet
+	 * came from
+	 *
+	 * @param paths all paths that can lead to the destination
+	 * @param notToPort the port that the packet came from
+	 */
+	private Path pickForwardPathIfPossible(Set<Path> paths, PortNumber notToPort) {
+		for (Path path : paths) {
+			if (!path.src().port().equals(notToPort)) {
+				return path;
+			}
+		}
+		return null;
+	}
 
-        flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(), forwardingObjective);          
-        packetOut(context, portNumber);
-    }
+	/**
+	 * Install flow rules on a switch
+	 *
+	 * @param context content of the incoming message
+	 * @param portNumber output port defined in the flow rule
+	 */
+	private void installRule(PacketContext context, PortNumber portNumber){
+		TrafficSelector.Builder selectorBuilder = DefaultTrafficSelector.builder();
+		InboundPacket pkt = context.inPacket(); 
+		Ethernet ethPkt = pkt.parsed();
+
+		if (ethPkt.isBroadcast()){
+			selectorBuilder.matchEthType(Ethernet.TYPE_IPV4)
+						.matchIPProtocol(IPv4.PROTOCOL_UDP)
+						.matchUdpDst(TpPort.tpPort(UDP.DHCP_SERVER_PORT))
+						.matchUdpSrc(TpPort.tpPort(UDP.DHCP_CLIENT_PORT));
+
+		} else {
+			selectorBuilder.matchInPort(context.inPacket().receivedFrom().port())
+						.matchEthSrc(ethPkt.getSourceMAC())
+						.matchEthDst(ethPkt.getDestinationMAC()); 
+
+		}
+
+		TrafficTreatment treatment = DefaultTrafficTreatment.builder()
+				.setOutput(portNumber)
+				.build();
+
+		ForwardingObjective forwardingObjective = DefaultForwardingObjective.builder()
+				.withSelector(selectorBuilder.build())
+				.withTreatment(treatment)
+				.withPriority(DEFAULT_PRIORITY)
+				.withFlag(ForwardingObjective.Flag.VERSATILE)
+				.fromApp(appId)
+				.makeTemporary(DEFAULT_TIMEOUT)
+				.add();
+
+		flowObjectiveService.forward(context.inPacket().receivedFrom().deviceId(), forwardingObjective);          
+		packetOut(context, portNumber);
+	}
 }
